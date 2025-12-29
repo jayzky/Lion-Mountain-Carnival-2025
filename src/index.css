@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+@media (min-width: 1024px) {
+  :root {
+    font-size: 18px;
+  }
+}
+
+body {
+  background-color: #0a0a0a; /* Very dark background */
+  color: #ffffff;
+  overflow: hidden; /* Prevent scrolling on kiosk mode */
+}
+
+@layer utilities {
+  .text-neon-red {
+    text-shadow: 0 0 5px #ff3c28, 0 0 10px #ff3c28;
+  }
+  
+  .text-neon-blue {
+    text-shadow: 0 0 5px #0ab9e6, 0 0 10px #0ab9e6;
+  }
+  
+  .border-neon-red {
+    box-shadow: 0 0 5px #ff3c28, inset 0 0 5px #ff3c28;
+  }
+  
+  .border-neon-blue {
+    box-shadow: 0 0 5px #0ab9e6, inset 0 0 5px #0ab9e6;
+  }
+
+  .glow-box {
+     backdrop-filter: blur(10px);
+     background: rgba(255, 255, 255, 0.03);
+  }
+}
