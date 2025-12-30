@@ -57,13 +57,14 @@ function App() {
     const [secretCount, setSecretCount] = useState(0)
     const [gameStandards, setGameStandards] = useState({})
     const [standardInput, setStandardInput] = useState('')
+    const [wheelOpen, setWheelOpen] = useState(false)
+    const [spinning, setSpinning] = useState(false)
+    const [spinRotation, setSpinRotation] = useState(0)
+    const [spinWinner, setSpinWinner] = useState('')
 
-    // Game Modes State (Persisted in LocalStorage)
-    const [availableGames, setAvailableGames] = useState(() => {
-        const saved = localStorage.getItem('carnival_games')
-        return saved ? JSON.parse(saved) : ['极速通关', '马里奥赛车', '舞力全开']
-    })
-    const [targetGame, setTargetGame] = useState(availableGames[0])
+    // Game Modes State (Synced from Supabase)
+    const [availableGames, setAvailableGames] = useState([])
+    const [targetGame, setTargetGame] = useState('')
     const [newGameName, setNewGameName] = useState('')
     const [isAddingGame, setIsAddingGame] = useState(false)
 
@@ -108,13 +109,32 @@ function App() {
         }
     }
 
+    const fetchGames = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('games')
+                .select('name')
+                .order('created_at', { ascending: true })
+
+            if (!error && data) {
+                const gameNames = data.map(row => row.name)
+                setAvailableGames(gameNames)
+            }
+        } catch (e) {
+            console.error('Failed to fetch games', e)
+        }
+    }
+
     useEffect(() => {
-        localStorage.setItem('carnival_games', JSON.stringify(availableGames))
+        if (!targetGame && availableGames.length > 0) {
+            setTargetGame(availableGames[0])
+        }
     }, [availableGames])
 
     useEffect(() => {
         fetchLeaderboard()
         fetchGameStandards()
+        fetchGames()
 
         const leaderboardChannel = supabase
             .channel('public:leaderboard')
@@ -130,10 +150,28 @@ function App() {
             })
             .subscribe()
 
+        const gamesChannel = supabase
+            .channel('public:games')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'games' }, () => {
+                fetchGames()
+            })
+            .subscribe()
+
         return () => {
             supabase.removeChannel(leaderboardChannel)
             supabase.removeChannel(standardsChannel)
+            supabase.removeChannel(gamesChannel)
         }
+    }, [])
+
+    // Fallback轮询，避免部分设备丢失实时推送
+    useEffect(() => {
+        const timer = setInterval(() => {
+            fetchLeaderboard()
+            fetchGameStandards()
+            fetchGames()
+        }, 10000)
+        return () => clearInterval(timer)
     }, [])
 
     useEffect(() => {
@@ -147,8 +185,8 @@ function App() {
 
     // Derived state for display
     const filteredLeaderboard = useMemo(() => {
-        return leaderboard
-            .filter(item => !item.game || item.game === targetGame)
+        if (!targetGame) return leaderboard
+        return leaderboard.filter(item => !item.game || item.game === targetGame)
     }, [leaderboard, targetGame])
 
     const top10 = useMemo(() => filteredLeaderboard.slice(0, 10), [filteredLeaderboard])
@@ -165,6 +203,18 @@ function App() {
 
     const displayStandard = standardForCurrentGame ?? null
 
+    const wheelGradient = useMemo(() => {
+        if (availableGames.length === 0) return 'radial-gradient(circle at center, #111 0%, #111 100%)'
+        const colors = ['#0ab9e6', '#ff3c28', '#ffc107', '#7c3aed', '#22c55e', '#f97316']
+        const parts = availableGames.map((name, idx) => {
+            const color = colors[idx % colors.length]
+            const start = (idx / availableGames.length) * 100
+            const end = ((idx + 1) / availableGames.length) * 100
+            return `${color} ${start}%, ${color} ${end}%`
+        })
+        return `conic-gradient(${parts.join(',')})`
+    }, [availableGames])
+
     const handleLogoClick = () => {
         setSecretCount(prev => {
             const newCount = prev + 1
@@ -180,11 +230,32 @@ function App() {
     const handleAddGame = (e) => {
         e.preventDefault()
         if (newGameName && !availableGames.includes(newGameName)) {
-            const newList = [...availableGames, newGameName]
-            setAvailableGames(newList)
-            setTargetGame(newGameName)
+            addGameToDatabase(newGameName)
             setNewGameName('')
             setIsAddingGame(false)
+        }
+    }
+
+    const addGameToDatabase = async (gameName) => {
+        const { error } = await supabase
+            .from('games')
+            .insert([{ name: gameName }])
+
+        if (error) {
+            alert('新增游戏失败: ' + error.message)
+        }
+    }
+
+    const handleRemoveGame = async (name) => {
+        if (confirm(`确定要删除游戏 "${name}" 吗？`)) {
+            const { error } = await supabase
+                .from('games')
+                .delete()
+                .eq('name', name)
+
+            if (error) {
+                alert('删除游戏失败: ' + error.message)
+            }
         }
     }
 
@@ -205,6 +276,7 @@ function App() {
         if (!error) {
             setPlayerName('')
             setScore('')
+            fetchLeaderboard() // ensure immediate refresh
             alert('录入成功！')
         } else {
             alert('错误: ' + error.message)
@@ -249,6 +321,24 @@ function App() {
         }
     }
 
+    const handleSpin = () => {
+        if (availableGames.length === 0 || spinning) return
+        const winnerIndex = Math.floor(Math.random() * availableGames.length)
+        const winnerName = availableGames[winnerIndex]
+        const anglePer = 360 / availableGames.length
+        const targetAngle = 360 * 5 + (360 - (winnerIndex * anglePer + anglePer / 2))
+
+        setSpinning(true)
+        setSpinWinner('')
+        setSpinRotation(prev => prev + targetAngle)
+
+        setTimeout(() => {
+            setSpinning(false)
+            setSpinWinner(winnerName)
+            setTargetGame(winnerName)
+        }, 4200)
+    }
+
     return (
         <div className="min-h-screen bg-[url('https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=60&w=1280&auto=format&fit=crop')] bg-cover bg-center bg-no-repeat font-sans selection:bg-neon-blue selection:text-black text-gray-100 overflow-hidden">
             <div className="absolute inset-0 bg-black/85"></div>
@@ -272,6 +362,12 @@ function App() {
                     </div>
 
                     <div className="flex items-center gap-6">
+                        <button
+                            onClick={() => setWheelOpen(true)}
+                            className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-neon-blue text-neon-blue font-bold hover:bg-neon-blue/10 transition"
+                        >
+                            <Star className="w-4 h-4" /> 转盘随机
+                        </button>
                         <div className="hidden md:flex flex-col items-end">
                             <span className="text-xs text-gray-500 uppercase tracking-widest">当前挑战</span>
                             <span className="text-xl font-bold text-neon-red glow-text shadow-neon-red">{targetGame}</span>
@@ -384,6 +480,13 @@ function App() {
             </div>
 
             {/* Admin Panel (Mobile Friendly) */}
+            <button
+                onClick={() => setWheelOpen(true)}
+                className="sm:hidden fixed bottom-5 right-5 z-40 px-4 py-3 rounded-full bg-neon-blue text-black font-bold shadow-[0_10px_30px_rgba(10,185,230,0.35)] border border-neon-blue/60"
+            >
+                转盘随机
+            </button>
+
             {adminOpen && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/90 backdrop-blur-xl animate-in fade-in duration-200">
                     <div className="w-full sm:max-w-md bg-zinc-900 border-t sm:border border-zinc-700 p-6 rounded-t-2xl sm:rounded-2xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
@@ -409,13 +512,21 @@ function App() {
                             <label className="block text-xs uppercase text-gray-500 font-bold">当前游戏 (切换/新增)</label>
                             <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
                                 {availableGames.map(mode => (
-                                    <button
-                                        key={mode}
-                                        onClick={() => setTargetGame(mode)}
-                                        className={`flex-none px-4 py-2 text-sm font-bold rounded-lg border transition whitespace-nowrap ${targetGame === mode ? 'bg-neon-blue text-black border-neon-blue' : 'bg-black/50 text-gray-400 border-zinc-700'}`}
-                                    >
-                                        {mode}
-                                    </button>
+                                    <div key={mode} className="flex items-center gap-1 flex-none">
+                                        <button
+                                            onClick={() => setTargetGame(mode)}
+                                            className={`px-4 py-2 text-sm font-bold rounded-lg border transition whitespace-nowrap ${targetGame === mode ? 'bg-neon-blue text-black border-neon-blue' : 'bg-black/50 text-gray-400 border-zinc-700'}`}
+                                        >
+                                            {mode}
+                                        </button>
+                                        <button
+                                            onClick={() => handleRemoveGame(mode)}
+                                            className="p-2 rounded-lg bg-black/40 border border-zinc-700 text-gray-500 hover:text-red-400 hover:border-red-400 transition"
+                                            aria-label={`删除 ${mode}`}
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
                                 ))}
                                 <button
                                     onClick={() => setIsAddingGame(true)}
@@ -531,6 +642,91 @@ function App() {
                             </div>
                         </div>
 
+                    </div>
+                </div>
+            )}
+
+            {/* Wheel Modal */}
+            {wheelOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-xl">
+                    <div className="absolute top-4 right-4">
+                        <button onClick={() => setWheelOpen(false)} className="p-2 bg-zinc-800 rounded-full text-gray-400 hover:text-white">
+                            <X size={20} />
+                        </button>
+                    </div>
+                    <div className="w-full max-w-4xl px-6">
+                        <div className="bg-zinc-900/80 border border-white/10 rounded-2xl p-6 shadow-2xl">
+                            <div className="flex flex-col sm:flex-row gap-6 items-center">
+                                <div className="relative w-72 h-72 sm:w-80 sm:h-80 flex items-center justify-center">
+                                    <div className="absolute -top-4 z-30 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-b-[24px] border-b-neon-red drop-shadow-[0_0_10px_rgba(255,60,40,0.7)]"></div>
+                                    <div
+                                        className={`relative w-full h-full rounded-full border-[6px] border-white/15 shadow-[0_0_40px_rgba(0,0,0,0.55)] transition-transform duration-[4200ms] ease-out will-change-transform overflow-hidden bg-black/40`}
+                                        style={{
+                                            background: wheelGradient,
+                                            transform: `rotate(${spinRotation}deg)`
+                                        }}
+                                    >
+                                        <div className="absolute inset-4 rounded-full border border-white/10 backdrop-blur-[2px]"></div>
+                                        {availableGames.length > 0 && availableGames.map((game, idx) => {
+                                            const angle = (360 / availableGames.length) * idx
+                                            return (
+                                                <div
+                                                    key={game}
+                                                    className="absolute inset-0 flex items-start justify-center"
+                                                    style={{ transform: `rotate(${angle}deg)` }}
+                                                >
+                                                    <div className="translate-y-3/4 -rotate-[var(--r,0deg)] text-center w-20 text-[12px] font-bold text-white/90 drop-shadow-md" style={{ ['--r']: `${angle}deg` }}>
+                                                        <div className="px-2 py-1 rounded-lg bg-black/60 border border-white/10">
+                                                            {game}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <div className="w-20 h-20 rounded-full bg-black/85 border border-white/20 flex flex-col items-center justify-center text-center px-2 shadow-[0_0_25px_rgba(0,0,0,0.6)]">
+                                                <span className="text-[11px] text-gray-500">随机游戏</span>
+                                                <span className="text-lg font-bold text-white">Spin</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 space-y-4 w-full">
+                                    <div className="flex items-center gap-2">
+                                        <Star className="text-neon-blue" />
+                                        <h3 className="text-xl font-bold">随机选择下一轮游戏</h3>
+                                    </div>
+                                    <p className="text-sm text-gray-400">点击“开始转动”后将随机选择一个游戏，并自动切换到该游戏，方便继续录入达标线和成绩。</p>
+
+                                    <div className="flex flex-wrap gap-2 text-sm">
+                                        {availableGames.map(game => (
+                                            <span key={game} className={`px-3 py-1 rounded-full border ${game === targetGame ? 'border-neon-blue text-neon-blue' : 'border-white/10 text-gray-300'}`}>
+                                                {game}
+                                            </span>
+                                        ))}
+                                        {availableGames.length === 0 && (
+                                            <span className="text-gray-500">请先在后台添加游戏</span>
+                                        )}
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            onClick={handleSpin}
+                                            disabled={availableGames.length === 0 || spinning}
+                                            className={`px-5 py-3 rounded-lg font-bold ${spinning ? 'bg-gray-700 text-gray-400' : 'bg-neon-blue text-black hover:opacity-90'} transition`}
+                                        >
+                                            {spinning ? '转动中...' : '开始转动'}
+                                        </button>
+                                        {spinWinner && (
+                                            <span className="text-sm text-gray-300">本轮结果：<span className="text-neon-red font-bold">{spinWinner}</span></span>
+                                        )}
+                                    </div>
+
+                                    <p className="text-xs text-gray-500">提示：可在后台管理中新增/删除游戏，转盘会实时更新。</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

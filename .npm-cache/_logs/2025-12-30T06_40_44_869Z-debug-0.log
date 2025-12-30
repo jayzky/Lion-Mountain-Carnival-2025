@@ -5,9 +5,9 @@
 4 silly config load:file:D:\Lion-Mountain-Carnival-2025\.npmrc
 5 silly config load:file:C:\Users\29642\.npmrc
 6 silly config load:file:C:\Program Files\nodejs\node_global\etc\npmrc
-7 verbose title npm run dev
-8 verbose argv "run" "dev"
-9 verbose logfile logs-max:10 dir:D:\Lion-Mountain-Carnival-2025\.npm-cache\_logs\2025-12-29T13_47_16_300Z-
-10 verbose logfile D:\Lion-Mountain-Carnival-2025\.npm-cache\_logs\2025-12-29T13_47_16_300Z-debug-0.log
+7 verbose title npm exec vite --host
+8 verbose argv "exec" "--" "vite" "--host"
+9 verbose logfile logs-max:10 dir:D:\Lion-Mountain-Carnival-2025\.npm-cache\_logs\2025-12-30T06_40_44_869Z-
+10 verbose logfile D:\Lion-Mountain-Carnival-2025\.npm-cache\_logs\2025-12-30T06_40_44_869Z-debug-0.log
 11 silly logfile start cleaning logs, removing 1 files
 12 silly logfile done cleaning log files
